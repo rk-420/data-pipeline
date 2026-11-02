@@ -22,24 +22,34 @@ def latest_raw_folder() -> Path:
     return folders[-1]
 
 
-def load_series(path: Path) -> pd.Series:
-    """Read one raw JSON file into a Series indexed by UTC timestamp.
-
-    The column name comes from the file name, e.g. solar_mwh.json -> solar_mwh.
-    """
+def load_chunk(path: Path, name: str) -> pd.Series:
+    """Read one raw weekly chunk into a Series indexed by UTC timestamp."""
     data = json.loads(path.read_text())
-    df = pd.DataFrame(data["series"], columns=["ts_ms", path.stem])
+    df = pd.DataFrame(data["series"], columns=["ts_ms", name])
     df["timestamp"] = pd.to_datetime(df["ts_ms"], unit="ms", utc=True)
-    series = df.set_index("timestamp")[path.stem]
-    # The same hour can appear twice if chunks overlap; keep the last value
+    return df.set_index("timestamp")[name]
+
+
+def load_series(folder: Path) -> pd.Series:
+    """Combine all weekly chunks of one series into a single Series.
+
+    The column name comes from the folder name, e.g. solar_mwh/ -> solar_mwh.
+    """
+    chunks = [load_chunk(path, folder.name) for path in sorted(folder.glob("*.json"))]
+    if not chunks:
+        raise FileNotFoundError(f"No JSON files in {folder}")
+    series = pd.concat(chunks).sort_index()
+    # The same hour can appear twice if chunks overlap. A missing value (NaN)
+    # must not win over a real one, so drop NaNs first, then keep the last value.
+    series = series.dropna()
     return series[~series.index.duplicated(keep="last")]
 
 
 def load_raw(folder: Path) -> pd.DataFrame:
-    """Combine all series in a folder into one table (one row per hour)."""
-    series = [load_series(path) for path in sorted(folder.glob("*.json"))]
+    """Combine all series in a run folder into one table (one row per hour)."""
+    series = [load_series(sub) for sub in sorted(folder.iterdir()) if sub.is_dir()]
     if not series:
-        raise FileNotFoundError(f"No JSON files in {folder}")
+        raise FileNotFoundError(f"No series folders in {folder}")
     return pd.concat(series, axis=1).sort_index()
 
 
