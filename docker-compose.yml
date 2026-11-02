@@ -1,0 +1,27 @@
+# Local PostgreSQL database for the pipeline.
+# Start: docker compose up -d    Stop: docker compose down
+# Settings (user, password, port) come from the .env file.
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: energy-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      # Only reachable from this computer. Host port 5433, because
+      # 5432 is already used by a local Homebrew PostgreSQL.
+      - "127.0.0.1:${POSTGRES_PORT}:5432"
+    volumes:
+      # Named volume: data survives "docker compose down" and restarts
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
