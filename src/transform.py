@@ -1,0 +1,113 @@
+"""Clean, validate and enrich the raw SMARD data and save it as Parquet."""
+import json
+from pathlib import Path
+
+import pandas as pd
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+RAW_DIR = PROJECT_ROOT / "data" / "raw"
+PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
+OUTPUT_FILE = PROCESSED_DIR / "energy_hourly.parquet"
+
+PRICE_COLUMN = "price_eur_mwh"
+PRICE_MIN, PRICE_MAX = -500, 4000  # EUR/MWh, the day-ahead market's price limits
+LOCAL_TZ = "Europe/Berlin"
+
+
+def latest_raw_folder() -> Path:
+    """Raw folders are named YYYY-MM-DD, so sorting by name gives the newest last."""
+    folders = sorted(p for p in RAW_DIR.iterdir() if p.is_dir())
+    if not folders:
+        raise FileNotFoundError(f"No raw data found in {RAW_DIR}")
+    return folders[-1]
+
+
+def load_series(path: Path) -> pd.Series:
+    """Read one raw JSON file into a Series indexed by UTC timestamp.
+
+    The column name comes from the file name, e.g. solar_mwh.json -> solar_mwh.
+    """
+    data = json.loads(path.read_text())
+    df = pd.DataFrame(data["series"], columns=["ts_ms", path.stem])
+    df["timestamp"] = pd.to_datetime(df["ts_ms"], unit="ms", utc=True)
+    series = df.set_index("timestamp")[path.stem]
+    # The same hour can appear twice if chunks overlap; keep the last value
+    return series[~series.index.duplicated(keep="last")]
+
+
+def load_raw(folder: Path) -> pd.DataFrame:
+    """Combine all series in a folder into one table (one row per hour)."""
+    series = [load_series(path) for path in sorted(folder.glob("*.json"))]
+    if not series:
+        raise FileNotFoundError(f"No JSON files in {folder}")
+    return pd.concat(series, axis=1).sort_index()
+
+
+def clean(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop hours where any value is missing.
+
+    The newest hours usually have a price (published a day ahead) but no
+    generation yet, so they are incomplete and are removed here.
+    """
+    return df.dropna(how="any")
+
+
+def validate(df: pd.DataFrame) -> None:
+    """Raise an error if the data looks wrong, so bad data never gets loaded."""
+    if df.empty:
+        raise ValueError("No complete hours left after cleaning")
+
+    if not df.index.is_unique:
+        raise ValueError("Duplicate timestamps found")
+
+    prices = df[PRICE_COLUMN]
+    out_of_range = prices[(prices < PRICE_MIN) | (prices > PRICE_MAX)]
+    if not out_of_range.empty:
+        raise ValueError(f"Prices outside {PRICE_MIN}..{PRICE_MAX}:\n{out_of_range}")
+
+    generation = df.drop(columns=PRICE_COLUMN)
+    if (generation < 0).any().any():
+        raise ValueError("Negative generation values found")
+
+    # Every hour between the first and last timestamp must be present
+    expected = pd.date_range(df.index.min(), df.index.max(), freq="h")
+    missing = expected.difference(df.index)
+    if not missing.empty:
+        raise ValueError(f"{len(missing)} missing hours, first: {missing[0]}")
+
+
+def enrich(df: pd.DataFrame) -> pd.DataFrame:
+    """Add columns that make analysis easier."""
+    df = df.copy()
+    generation_columns = [c for c in df.columns if c != PRICE_COLUMN]
+    df["renewable_mwh"] = df[generation_columns].sum(axis=1)
+
+    # Analysis is done in German local time (handles summer/winter time)
+    local = df.index.tz_convert(LOCAL_TZ)
+    df["date"] = local.date
+    df["hour"] = local.hour
+    df["weekday"] = local.day_name()
+    return df
+
+
+def run() -> pd.DataFrame:
+    folder = latest_raw_folder()
+    print(f"Reading raw data from {folder}")
+
+    df = load_raw(folder)
+    rows_before = len(df)
+    df = clean(df)
+    print(f"Kept {len(df)} of {rows_before} hours (dropped incomplete hours)")
+
+    validate(df)
+    df = enrich(df)
+
+    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(OUTPUT_FILE)
+    print(f"Saved {len(df)} rows -> {OUTPUT_FILE}")
+    print(df.head())
+    return df
+
+
+if __name__ == "__main__":
+    run()

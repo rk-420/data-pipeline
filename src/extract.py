@@ -16,7 +16,9 @@ SERIES = {
     "wind_onshore_mwh": (4067, "DE"),     # onshore wind generation
 }
 
-RAW_DIR = Path("data/raw")
+# Build paths from this file's location, so the script works from any folder
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+RAW_DIR = PROJECT_ROOT / "data" / "raw"
 
 
 def get_latest_timestamp(filter_id: int, region: str) -> int:
