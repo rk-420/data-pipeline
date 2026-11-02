@@ -3,12 +3,17 @@
 Idempotent means: running the load twice gives the same result as running it
 once. New hours are inserted, existing hours are updated, nothing is duplicated.
 """
+import logging
 import os
 from pathlib import Path
 
 import pandas as pd
 import psycopg
 from dotenv import load_dotenv
+
+from logging_setup import setup_logging
+
+logger = logging.getLogger("load")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PROCESSED_FILE = PROJECT_ROOT / "data" / "processed" / "energy_hourly.parquet"
@@ -80,11 +85,11 @@ def run() -> None:
             changed = cur.rowcount
         after = count_rows(conn)
 
-    print(f"Rows in file: {len(rows)}")
-    print(f"Inserted: {after - before}, updated: {changed - (after - before)}, "
-          f"unchanged: {len(rows) - changed}")
-    print(f"Rows in table: {after}")
+    inserted = after - before
+    logger.info("Rows in file: %d | inserted: %d, updated: %d, unchanged: %d | rows in table: %d",
+                len(rows), inserted, changed - inserted, len(rows) - changed, after)
 
 
 if __name__ == "__main__":
+    setup_logging()
     run()

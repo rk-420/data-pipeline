@@ -4,3 +4,4 @@ pyarrow
 psycopg[binary]
 python-dotenv
 streamlit
+pytest

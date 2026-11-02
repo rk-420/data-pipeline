@@ -6,6 +6,7 @@ those chunks. Each response is saved unchanged as raw JSON.
 """
 import argparse
 import json
+import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,10 @@ from pathlib import Path
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+from logging_setup import setup_logging
+
+logger = logging.getLogger("extract")
 
 BASE_URL = "https://www.smard.de/app/chart_data"
 RESOLUTION = "hour"
@@ -92,13 +97,14 @@ def run(weeks: int = DEFAULT_WEEKS) -> Path:
         for ts in timestamps:
             data = fetch_chunk(session, filter_id, region, ts)
             save_raw(data, run_folder, name, ts)
-        print(f"Saved {len(timestamps)} chunks of {name}")
+        logger.info("Saved %d chunks of %s", len(timestamps), name)
 
-    print(f"Raw data saved to {run_folder}")
+    logger.info("Raw data saved to %s", run_folder)
     return run_folder
 
 
 if __name__ == "__main__":
+    setup_logging()
     parser = argparse.ArgumentParser(description="Download SMARD data")
     parser.add_argument("--weeks", type=int, default=DEFAULT_WEEKS,
                         help=f"number of weekly chunks to load (default {DEFAULT_WEEKS})")

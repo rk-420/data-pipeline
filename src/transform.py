@@ -1,8 +1,13 @@
 """Clean, validate and enrich the raw SMARD data and save it as Parquet."""
 import json
+import logging
 from pathlib import Path
 
 import pandas as pd
+
+from logging_setup import setup_logging
+
+logger = logging.getLogger("transform")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = PROJECT_ROOT / "data" / "raw"
@@ -107,24 +112,26 @@ def enrich(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def run() -> pd.DataFrame:
-    folder = latest_raw_folder()
-    print(f"Reading raw data from {folder}")
+def run(folder: Path | None = None) -> pd.DataFrame:
+    """Transform one raw run folder. Without a folder, use the newest one."""
+    folder = folder or latest_raw_folder()
+    logger.info("Reading raw data from %s", folder)
 
     df = load_raw(folder)
     rows_before = len(df)
     df = clean(df)
-    print(f"Kept {len(df)} of {rows_before} hours (dropped incomplete hours)")
+    logger.info("Kept %d of %d hours (dropped incomplete hours)", len(df), rows_before)
 
     validate(df)
     df = enrich(df)
 
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     df.to_parquet(OUTPUT_FILE)
-    print(f"Saved {len(df)} rows -> {OUTPUT_FILE}")
-    print(df.head())
+    logger.info("Saved %d rows (%s to %s) -> %s",
+                len(df), df["date"].min(), df["date"].max(), OUTPUT_FILE)
     return df
 
 
 if __name__ == "__main__":
+    setup_logging()
     run()
