@@ -1,7 +1,23 @@
-requests
-pandas
-pyarrow
-psycopg[binary]
-python-dotenv
-streamlit
-pytest
+# Packages needed to run the pipeline and the dashboard (Python 3.14).
+# Install: pip install -r requirements.txt
+
+# Extract
+requests==2.34.2
+
+# Transform
+pandas==3.1.0
+pyarrow==26.0.0
+
+# Load (PostgreSQL)
+psycopg[binary]==3.3.6
+python-dotenv==1.2.4
+
+# Dashboard (altair is the chart library used by Streamlit)
+streamlit==1.66.1
+altair==6.3.0
+
+# AWS S3 upload
+boto3==1.43.123
+
+# Daily summary (LLM API)
+anthropic==2.3.0
