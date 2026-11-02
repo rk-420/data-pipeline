@@ -86,10 +86,13 @@ def save_raw(data: dict, run_folder: Path, name: str, ts: int) -> Path:
     return path
 
 
-def run(weeks: int = DEFAULT_WEEKS) -> Path:
-    """Download the last `weeks` chunks of every series. Returns the run folder."""
+def run(weeks: int = DEFAULT_WEEKS, raw_dir: Path = RAW_DIR) -> Path:
+    """Download the last `weeks` chunks of every series. Returns the run folder.
+
+    raw_dir can be changed, e.g. to /tmp in AWS Lambda (the only writable folder).
+    """
     run_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    run_folder = RAW_DIR / run_date
+    run_folder = raw_dir / run_date
     session = create_session()
 
     for name, (filter_id, region) in SERIES.items():

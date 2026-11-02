@@ -1,0 +1,62 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "UploadFromLaptop",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": [
+        "arn:aws:s3:::YOUR_BUCKET/raw/*",
+        "arn:aws:s3:::YOUR_BUCKET/processed/*"
+      ]
+    },
+    {
+      "Sid": "AthenaReadsDataAndWritesResults",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::YOUR_BUCKET/processed/*",
+        "arn:aws:s3:::YOUR_BUCKET/athena-results/*"
+      ]
+    },
+    {
+      "Sid": "AthenaListsBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": "arn:aws:s3:::YOUR_BUCKET"
+    },
+    {
+      "Sid": "RunAthenaQueries",
+      "Effect": "Allow",
+      "Action": [
+        "athena:StartQueryExecution",
+        "athena:GetQueryExecution",
+        "athena:GetQueryResults",
+        "athena:StopQueryExecution",
+        "athena:GetWorkGroup"
+      ],
+      "Resource": "arn:aws:athena:eu-central-1:YOUR_ACCOUNT_ID:workgroup/energy"
+    },
+    {
+      "Sid": "ReadGlueCatalogForEnergyDatabase",
+      "Effect": "Allow",
+      "Action": [
+        "glue:GetDatabase",
+        "glue:GetTable",
+        "glue:GetTables",
+        "glue:GetPartitions"
+      ],
+      "Resource": [
+        "arn:aws:glue:eu-central-1:YOUR_ACCOUNT_ID:catalog",
+        "arn:aws:glue:eu-central-1:YOUR_ACCOUNT_ID:database/energy",
+        "arn:aws:glue:eu-central-1:YOUR_ACCOUNT_ID:table/energy/*"
+      ]
+    }
+  ]
+}
