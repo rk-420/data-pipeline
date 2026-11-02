@@ -9,6 +9,8 @@ with an **LLM-generated daily market summary**.
 
 **Key question:** How do solar and wind generation affect electricity prices?
 
+📄 **New here?** Read the [project overview in easy points](docs/PROJECT_OVERVIEW.md).
+
 ## Results
 
 Based on 8 weeks of hourly data (14 Sep – 2 Nov 2026, 1,193 hours):
