@@ -29,3 +29,11 @@ CREATE TABLE IF NOT EXISTS energy_hourly (
 
 -- The dashboard filters by date, so an index makes those queries fast
 CREATE INDEX IF NOT EXISTS idx_energy_hourly_date ON energy_hourly (date);
+
+-- One LLM-generated market summary per day (written by src/summary.py)
+CREATE TABLE IF NOT EXISTS daily_summary (
+    date        DATE         PRIMARY KEY,   -- the day that is summarized (German time)
+    summary     TEXT         NOT NULL,
+    model       TEXT         NOT NULL,      -- which model wrote it
+    created_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
