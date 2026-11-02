@@ -26,6 +26,7 @@ SERIES = {
     "solar_mwh": (4068, "DE"),            # photovoltaic generation
     "wind_onshore_mwh": (4067, "DE"),     # onshore wind generation
     "wind_offshore_mwh": (1225, "DE"),    # offshore wind generation
+    "load_mwh": (410, "DE"),              # total electricity consumption (grid load)
 }
 
 # Build paths from this file's location, so the script works from any folder

@@ -1,0 +1,204 @@
+"""Streamlit dashboard: how do solar and wind generation affect electricity prices?
+
+Run from the project root:  streamlit run dashboard/app.py
+"""
+import sys
+from pathlib import Path
+
+import altair as alt
+import pandas as pd
+import streamlit as st
+
+# Reuse the database connection from the pipeline (settings come from .env)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.append(str(PROJECT_ROOT / "src"))
+from load import get_connection  # noqa: E402
+
+LOCAL_TZ = "Europe/Berlin"
+
+# Chart colors. Each generation type keeps its color in every chart.
+# Price is a single measure, so it uses a neutral color instead of a series hue.
+GENERATION_COLORS = {
+    "Wind onshore": "#2a78d6",
+    "Solar": "#eb6834",
+    "Wind offshore": "#1baf7a",
+}
+PRICE_COLOR = "#7c7b76"
+
+
+@st.cache_data(ttl=600)
+def load_data() -> pd.DataFrame:
+    """Read all hours from PostgreSQL. Cached for 10 minutes, so the database
+    is not queried again on every click in the dashboard."""
+    query = """
+        SELECT timestamp_utc, price_eur_mwh, solar_mwh, wind_onshore_mwh,
+               wind_offshore_mwh, renewable_mwh, load_mwh, renewable_share,
+               date, hour, weekday
+        FROM energy_hourly
+        ORDER BY timestamp_utc
+    """
+    with get_connection() as conn:
+        cur = conn.execute(query)
+        columns = [col.name for col in cur.description]
+        df = pd.DataFrame(cur.fetchall(), columns=columns)
+
+    # PostgreSQL NUMERIC arrives as Python Decimal; charts need floats
+    numeric = ["price_eur_mwh", "solar_mwh", "wind_onshore_mwh", "wind_offshore_mwh",
+               "renewable_mwh", "load_mwh", "renewable_share"]
+    df[numeric] = df[numeric].astype(float)
+    # Charts get the exact UTC moment ("time"); the browser shows it in local
+    # time and handles the clock change correctly. A naive local time would
+    # contain 02:00 twice on the last Sunday of October.
+    df["time"] = pd.to_datetime(df["timestamp_utc"], utc=True)
+    # German local time as text-friendly values, for the KPIs and the table
+    df["local_time"] = df["time"].dt.tz_convert(LOCAL_TZ).dt.tz_localize(None)
+    return df
+
+
+def date_filter(df: pd.DataFrame) -> pd.DataFrame:
+    """Sidebar date range picker. Returns only the selected days."""
+    first, last = df["date"].min(), df["date"].max()
+    selected = st.sidebar.date_input(
+        "Date range", value=(first, last), min_value=first, max_value=last
+    )
+    # While the user is picking, only the start date may be selected
+    if len(selected) != 2:
+        st.stop()
+    start, end = selected
+    return df[(df["date"] >= start) & (df["date"] <= end)]
+
+
+def show_kpis(df: pd.DataFrame) -> None:
+    cheapest = df.loc[df["price_eur_mwh"].idxmin()]
+    priciest = df.loc[df["price_eur_mwh"].idxmax()]
+    # Weighted share: total renewable energy / total consumption. Averaging the
+    # hourly percentages would give a quiet night hour the same weight as a busy day.
+    share = df["renewable_mwh"].sum() / df["load_mwh"].sum()
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Average price", f"{df['price_eur_mwh'].mean():.2f} €/MWh")
+    col2.metric("Solar + wind share of consumption", f"{share:.1%}")
+    col3.metric("Cheapest hour", f"{cheapest['price_eur_mwh']:.2f} €/MWh",
+                delta=cheapest["local_time"].strftime("%d %b, %H:%M"), delta_color="off")
+    col4.metric("Most expensive hour", f"{priciest['price_eur_mwh']:.2f} €/MWh",
+                delta=priciest["local_time"].strftime("%d %b, %H:%M"), delta_color="off")
+
+
+def price_chart(df: pd.DataFrame) -> alt.Chart:
+    """Hourly price over time, with a zero line because prices can go negative."""
+    # Pass only the needed columns: everything given to Altair is sent to the browser
+    base = alt.Chart(df[["time", "price_eur_mwh"]]).encode(
+        x=alt.X("time:T", title=None),
+        y=alt.Y("price_eur_mwh:Q", title="€/MWh"),
+    )
+    line = base.mark_line(color=PRICE_COLOR, strokeWidth=2)
+    # Invisible, larger points give the tooltip a bigger hover target
+    hover = base.mark_point(size=80, opacity=0).encode(
+        tooltip=[alt.Tooltip("time:T", title="Time", format="%d %b %H:%M"),
+                 alt.Tooltip("price_eur_mwh:Q", title="Price (€/MWh)", format=".2f")]
+    )
+    zero = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(
+        color=PRICE_COLOR, strokeDash=[4, 4], opacity=0.6).encode(y="y:Q")
+    return (line + hover + zero).properties(height=260)
+
+
+def generation_chart(df: pd.DataFrame) -> alt.Chart:
+    """Solar and wind generation over time, stacked so the top edge is the total."""
+    long = df.melt(
+        id_vars="time",
+        value_vars=["wind_onshore_mwh", "solar_mwh", "wind_offshore_mwh"],
+        var_name="source", value_name="mwh",
+    )
+    long["source"] = long["source"].map({
+        "wind_onshore_mwh": "Wind onshore",
+        "solar_mwh": "Solar",
+        "wind_offshore_mwh": "Wind offshore",
+    })
+    return alt.Chart(long).mark_area(opacity=0.85).encode(
+        x=alt.X("time:T", title=None),
+        y=alt.Y("mwh:Q", stack=True, title="MWh per hour"),
+        color=alt.Color("source:N", title=None,
+                        scale=alt.Scale(domain=list(GENERATION_COLORS),
+                                        range=list(GENERATION_COLORS.values())),
+                        legend=alt.Legend(orient="top")),
+        order=alt.Order("source:N", sort="descending"),
+        tooltip=[alt.Tooltip("time:T", title="Time", format="%d %b %H:%M"),
+                 alt.Tooltip("source:N", title="Source"),
+                 alt.Tooltip("mwh:Q", title="MWh", format=",.0f")],
+    ).properties(height=260)
+
+
+def hourly_profile_chart(df: pd.DataFrame) -> alt.Chart:
+    """Average price for each hour of the day (German local time)."""
+    by_hour = df.groupby("hour", as_index=False).agg(
+        price=("price_eur_mwh", "mean"), solar=("solar_mwh", "mean"))
+    return alt.Chart(by_hour).mark_bar(
+        color=PRICE_COLOR, cornerRadiusTopLeft=4, cornerRadiusTopRight=4,
+    ).encode(
+        x=alt.X("hour:O", title="Hour of day", axis=alt.Axis(labelAngle=0)),
+        y=alt.Y("price:Q", title="Average €/MWh"),
+        tooltip=[alt.Tooltip("hour:O", title="Hour"),
+                 alt.Tooltip("price:Q", title="Avg price (€/MWh)", format=".2f"),
+                 alt.Tooltip("solar:Q", title="Avg solar (MWh)", format=",.0f")],
+    ).properties(height=300)
+
+
+def scatter_chart(df: pd.DataFrame) -> alt.Chart:
+    """One dot per hour: renewable generation vs. price, plus a trend line."""
+    data = df[["time", "renewable_mwh", "renewable_share", "price_eur_mwh"]]
+    base = alt.Chart(data).encode(
+        x=alt.X("renewable_mwh:Q", title="Solar + wind generation (MWh)"),
+        y=alt.Y("price_eur_mwh:Q", title="Price (€/MWh)"),
+    )
+    dots = base.mark_circle(size=40, opacity=0.35, color=PRICE_COLOR).encode(
+        tooltip=[alt.Tooltip("time:T", title="Time", format="%d %b %H:%M"),
+                 alt.Tooltip("renewable_mwh:Q", title="Solar + wind (MWh)", format=",.0f"),
+                 alt.Tooltip("renewable_share:Q", title="Share of consumption", format=".0%"),
+                 alt.Tooltip("price_eur_mwh:Q", title="Price (€/MWh)", format=".2f")]
+    )
+    # Straight-line fit (least squares) shows the overall direction
+    trend = base.transform_regression("renewable_mwh", "price_eur_mwh").mark_line(
+        color="#2a78d6", strokeWidth=2, strokeDash=[6, 4])
+    return (dots + trend).properties(height=320)
+
+
+def main() -> None:
+    st.set_page_config(page_title="German Electricity Market", layout="wide")
+    st.title("German Electricity Market")
+    st.caption("Hourly day-ahead prices and solar/wind generation. "
+               "Source: SMARD (Bundesnetzagentur). Times in your browser's time zone (German time in Germany).")
+
+    try:
+        df = load_data()
+    except Exception as error:
+        st.error(f"Could not read from the database. Is it running "
+                 f"(`docker compose up -d`)?\n\n{error}")
+        st.stop()
+    if df.empty:
+        st.warning("The database is empty. Run the pipeline first.")
+        st.stop()
+
+    df = date_filter(df)
+    st.sidebar.caption(f"{len(df):,} hours selected")
+
+    show_kpis(df)
+
+    st.subheader("Price and generation over time")
+    st.altair_chart(price_chart(df), width="stretch")
+    st.altair_chart(generation_chart(df), width="stretch")
+
+    left, right = st.columns(2)
+    with left:
+        st.subheader("Average price by hour of day")
+        st.altair_chart(hourly_profile_chart(df), width="stretch")
+    with right:
+        st.subheader("More solar and wind, lower prices?")
+        corr = df["price_eur_mwh"].corr(df["renewable_mwh"])
+        st.altair_chart(scatter_chart(df), width="stretch")
+        st.caption(f"Correlation: {corr:.2f} (−1 = perfectly opposite, 0 = no relation)")
+
+    with st.expander("Show data table"):
+        st.dataframe(df.drop(columns=["timestamp_utc", "time"]), width="stretch")
+
+
+main()

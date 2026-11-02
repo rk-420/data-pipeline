@@ -10,6 +10,8 @@ PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 OUTPUT_FILE = PROCESSED_DIR / "energy_hourly.parquet"
 
 PRICE_COLUMN = "price_eur_mwh"
+LOAD_COLUMN = "load_mwh"
+GENERATION_COLUMNS = ["solar_mwh", "wind_onshore_mwh", "wind_offshore_mwh"]
 PRICE_MIN, PRICE_MAX = -500, 4000  # EUR/MWh, the day-ahead market's price limits
 LOCAL_TZ = "Europe/Berlin"
 
@@ -75,9 +77,12 @@ def validate(df: pd.DataFrame) -> None:
     if not out_of_range.empty:
         raise ValueError(f"Prices outside {PRICE_MIN}..{PRICE_MAX}:\n{out_of_range}")
 
-    generation = df.drop(columns=PRICE_COLUMN)
-    if (generation < 0).any().any():
+    if (df[GENERATION_COLUMNS] < 0).any().any():
         raise ValueError("Negative generation values found")
+
+    # Load is used as a divisor for the renewable share, so it must be positive
+    if (df[LOAD_COLUMN] <= 0).any():
+        raise ValueError("Load must be greater than zero")
 
     # Every hour between the first and last timestamp must be present
     expected = pd.date_range(df.index.min(), df.index.max(), freq="h")
@@ -89,8 +94,10 @@ def validate(df: pd.DataFrame) -> None:
 def enrich(df: pd.DataFrame) -> pd.DataFrame:
     """Add columns that make analysis easier."""
     df = df.copy()
-    generation_columns = [c for c in df.columns if c != PRICE_COLUMN]
-    df["renewable_mwh"] = df[generation_columns].sum(axis=1)
+    df["renewable_mwh"] = df[GENERATION_COLUMNS].sum(axis=1)
+    # Share of consumption covered by solar + wind (0.6 = 60 %). It can go
+    # above 1 in very windy, sunny hours when Germany exports the surplus.
+    df["renewable_share"] = df["renewable_mwh"] / df[LOAD_COLUMN]
 
     # Analysis is done in German local time (handles summer/winter time)
     local = df.index.tz_convert(LOCAL_TZ)

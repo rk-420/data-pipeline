@@ -17,7 +17,7 @@ SCHEMA_FILE = PROJECT_ROOT / "sql" / "schema.sql"
 # Columns written to the database, in this order (timestamp_utc comes first)
 VALUE_COLUMNS = [
     "price_eur_mwh", "solar_mwh", "wind_onshore_mwh", "wind_offshore_mwh",
-    "renewable_mwh", "date", "hour", "weekday",
+    "renewable_mwh", "load_mwh", "renewable_share", "date", "hour", "weekday",
 ]
 ALL_COLUMNS = ["timestamp_utc"] + VALUE_COLUMNS
 
@@ -56,7 +56,7 @@ def to_rows(df: pd.DataFrame) -> list[tuple]:
             r.timestamp_utc.to_pydatetime(),
             float(r.price_eur_mwh), float(r.solar_mwh),
             float(r.wind_onshore_mwh), float(r.wind_offshore_mwh),
-            float(r.renewable_mwh),
+            float(r.renewable_mwh), float(r.load_mwh), float(r.renewable_share),
             r.date, int(r.hour), str(r.weekday),
         ))
     return rows

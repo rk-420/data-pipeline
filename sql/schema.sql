@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS energy_hourly (
     wind_onshore_mwh   NUMERIC(10, 2) NOT NULL CHECK (wind_onshore_mwh >= 0),
     wind_offshore_mwh  NUMERIC(10, 2) NOT NULL CHECK (wind_offshore_mwh >= 0),
     renewable_mwh      NUMERIC(10, 2) NOT NULL CHECK (renewable_mwh >= 0),
+    load_mwh           NUMERIC(10, 2) NOT NULL CHECK (load_mwh > 0),
+    -- renewable_mwh / load_mwh, e.g. 0.6234 = 62.34 % (can exceed 1)
+    renewable_share    NUMERIC(6, 4)  NOT NULL CHECK (renewable_share >= 0),
 
     -- Local German time (Europe/Berlin), for grouping by day/hour/weekday
     date               DATE           NOT NULL,
